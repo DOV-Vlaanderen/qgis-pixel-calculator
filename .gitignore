@@ -1,0 +1,6 @@
+venv
+.venv
+
+help/build
+
+qgis/
