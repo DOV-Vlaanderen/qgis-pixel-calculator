@@ -1,3 +1,4 @@
+import os
 from queue import Empty, Queue
 from threading import Thread
 
@@ -7,22 +8,24 @@ class WorkerThreadPool:
     in parallel.
     """
 
-    def __init__(self, workers=4):
+    def __init__(self, worker_count=None, aggregation_function=None):
         """Initialisation.
 
         Set up the pool and start all workers.
 
         Parameters
         ----------
-        workers : int, optional
-            Number of worker threads to use, defaults to 4.
+        worker_count : int, optional
+            Number of worker threads to use, defaults to os.cpu_count
         """
+        self.worker_count = worker_count or os.cpu_count()
+
         self.workers = []
         self.input_queue = Queue(maxsize=100)
         self.result_queue = Queue()
 
-        for i in range(workers):
-            self.workers.append(WorkerThread(self.input_queue))
+        for i in range(self.worker_count):
+            self.workers.append(WorkerThread(self.input_queue, self.result_queue, aggregation_function))
 
         self._start()
 
@@ -52,7 +55,6 @@ class WorkerThreadPool:
         """
         r = WorkerResult()
         self.input_queue.put((fn, args, r))
-        self.result_queue.put(r)
 
     def join(self):
         """Wait for all the jobs to be executed and return the results of all
@@ -128,7 +130,7 @@ class WorkerResult:
 class WorkerThread(Thread):
     """Worker thread using a local Session to execute functions. """
 
-    def __init__(self, input_queue):
+    def __init__(self, input_queue, result_queue, aggregation_function):
         """Initialisation.
 
         Bind to the input queue and create a Session.
@@ -143,6 +145,11 @@ class WorkerThread(Thread):
         """
         super().__init__()
         self.input_queue = input_queue
+        self.result_queue = result_queue
+
+        self.aggregation_function = aggregation_function
+        if self.aggregation_function:
+            self.temp_result_queue = Queue()
 
         self.stopping = False
 
@@ -150,6 +157,19 @@ class WorkerThread(Thread):
         """Stop the worker thread at the next occasion. This can take up to
         500 ms. """
         self.stopping = True
+
+        if self.aggregation_function:
+            aggregate = None
+
+            while not self.temp_result_queue.empty():
+                res = self.temp_result_queue.get()
+
+                if res.get_result():
+                    aggregate = self.aggregation_function(aggregate, res.get_result())
+
+            thread_result = WorkerResult()
+            thread_result.set_result(aggregate)
+            self.result_queue.put(thread_result)
 
     def run(self):
         """Executed while the thread is running. This is called implicitly
@@ -167,5 +187,10 @@ class WorkerThread(Thread):
                     r.set_result(result)
                 finally:
                     self.input_queue.task_done()
+
+                    if self.aggregation_function:
+                        self.temp_result_queue.put(r)
+                    else:
+                        self.result_queue.put(r)
             except Empty:
                 pass

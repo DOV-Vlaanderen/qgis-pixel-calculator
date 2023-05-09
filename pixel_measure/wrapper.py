@@ -106,9 +106,6 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         valSum = 0
         valCnt = 0
 
-        progress_done = 0
-        progress_todo = self.blockWidth * self.blockHeight
-
         noData = None
         if self.rasterLayer.dataProvider().sourceHasNoDataValue(self.band):
             noData = self.rasterLayer.dataProvider().sourceNoDataValue(self.band)
@@ -133,7 +130,16 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
 
             return None, None
 
+        def aggregateGeometry(aggregate, item):
+            if aggregate is None:
+                aggregate = item
+            elif item is not None:
+                aggregate = aggregate.combine(item)
+
+            return aggregate
+
         processPixelPool = WorkerThreadPool()
+        aggregateGeomPool = WorkerThreadPool(aggregation_function=aggregateGeometry)
 
         for r in range(self.blockHeight):
             for c in range(self.blockWidth):
@@ -151,18 +157,20 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
                 return False
 
             rect, value = res.get_result()
-            progress_done += 1
 
             if rect is not None and value is not None:
                 valSum += value
                 valCnt += 1
 
-                if not self.newGeometry:
-                    self.newGeometry = rect
-                else:
-                    self.newGeometry = self.newGeometry.combine(rect)
+                aggregateGeomPool.execute(lambda x: x, (rect,))
 
-            self.setProgress((progress_done/progress_todo) * 100)
+        for res in aggregateGeomPool.join():
+            if self.shouldCancel:
+                self.failed.emit()
+                return False
+
+            geom = res.get_result()
+            self.newGeometry = aggregateGeometry(self.newGeometry, geom)
 
         if valCnt > 0:
             self.stats['sum'] = valSum
