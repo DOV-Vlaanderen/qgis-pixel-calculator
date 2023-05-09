@@ -148,9 +148,12 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
                 self.progressDone += 1
                 self.setProgress((self.progressDone / self.progressTodo) * 100)
 
+        def cancelFunction():
+            return self.shouldCancel
+
         processPixelPool = WorkerThreadPool(progress_function=progressTracker)
         aggregateGeomPool = WorkerThreadPool(
-            progress_function=progressTracker, aggregation_function=aggregateGeometry)
+            progress_function=progressTracker, cancel_function=cancelFunction, aggregation_function=aggregateGeometry)
 
         for r in range(self.blockHeight):
             for c in range(self.blockWidth):

@@ -8,7 +8,7 @@ class WorkerThreadPool:
     in parallel.
     """
 
-    def __init__(self, worker_count=None, progress_function=None, aggregation_function=None):
+    def __init__(self, worker_count=None, progress_function=None, cancel_function=None, aggregation_function=None):
         """Initialisation.
 
         Set up the pool and start all workers.
@@ -30,6 +30,7 @@ class WorkerThreadPool:
                     self.input_queue,
                     self.result_queue,
                     progress_function,
+                    cancel_function,
                     aggregation_function
                 )
             )
@@ -137,7 +138,7 @@ class WorkerResult:
 class WorkerThread(Thread):
     """Worker thread using a local Session to execute functions. """
 
-    def __init__(self, input_queue, result_queue, progress_function, aggregation_function):
+    def __init__(self, input_queue, result_queue, progress_function, cancel_function, aggregation_function):
         """Initialisation.
 
         Bind to the input queue and create a Session.
@@ -155,12 +156,19 @@ class WorkerThread(Thread):
         self.result_queue = result_queue
 
         self.progress_function = progress_function
+        self.cancel_function = cancel_function
 
         self.aggregation_function = aggregation_function
         if self.aggregation_function:
             self.temp_result_queue = Queue()
 
         self.stopping = False
+
+    def _should_cancel(self):
+        if self.cancel_function:
+            return self.cancel_function()
+        else:
+            return False
 
     def stop(self):
         """Stop the worker thread at the next occasion. This can take up to
@@ -170,7 +178,7 @@ class WorkerThread(Thread):
         if self.aggregation_function:
             aggregate = None
 
-            while not self.temp_result_queue.empty():
+            while not self.temp_result_queue.empty() and not self._should_cancel():
                 res = self.temp_result_queue.get()
 
                 if res.get_result():
@@ -209,3 +217,6 @@ class WorkerThread(Thread):
 
             except Empty:
                 pass
+
+            if self._should_cancel():
+                self.stop()
