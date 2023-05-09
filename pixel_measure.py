@@ -6,9 +6,9 @@ import qgis.core as QGisCore
 class RasterBlockWrapper(QGisCore.QgsTask):
     """Class to align a vector geometry to the grid of a raster layer."""
 
-    taskFinished = QtCore.pyqtSignal(object)
+    completed = QtCore.pyqtSignal(object)
 
-    def __init__(self, rasterLayer, band, geometry, callback):
+    def __init__(self, rasterLayer, band, geometry):
         """Initialisation.
         Aligns the given geometry to the grid of the raster layer.
         Parameters
@@ -27,7 +27,6 @@ class RasterBlockWrapper(QGisCore.QgsTask):
         self.rasterLayer = rasterLayer
         self.band = band
         self.geometry = geometry
-        self.callback = callback
 
         self.geomBbox = self.geometry.boundingBox()
 
@@ -145,7 +144,7 @@ class RasterBlockWrapper(QGisCore.QgsTask):
             self.stats['count'] = valCnt
             self.stats['avg'] = valSum/float(valCnt)
 
-        self.taskFinished.emit((self.newGeometry, self.stats))
+        self.completed.emit((self.newGeometry, self.stats))
         return True
 
 
@@ -266,11 +265,12 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
 
             self.commitChanges()
 
+        self.main.iface.actionPan().trigger()
         ft = next(self.getFeatures(QGisCore.QgsFeatureRequest(fid)))
 
-        task = RasterBlockWrapper(self.rasterLayer, 1, ft.geometry(), drawPixelisedFeature)
-        task.taskFinished.connect(drawPixelisedFeature)
-        QGisCore.QgsApplication.taskManager().addTask(task)
+        self.task = RasterBlockWrapper(self.rasterLayer, 1, ft.geometry())
+        self.task.completed.connect(drawPixelisedFeature)
+        QGisCore.QgsApplication.taskManager().addTask(self.task)
 
 
 class PixelMeasureAction(QtGui.QAction):
