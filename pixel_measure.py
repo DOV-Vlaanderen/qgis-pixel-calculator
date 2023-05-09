@@ -3,7 +3,7 @@ import PyQt5.QtGui as QtGui
 import qgis.core as QGisCore
 
 
-class RasterBlockWrapper(QGisCore.QgsTask):
+class RasterBlockWrapperTask(QGisCore.QgsTask):
     """Class to align a vector geometry to the grid of a raster layer."""
 
     completed = QtCore.pyqtSignal(object)
@@ -268,7 +268,7 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
         self.main.iface.actionPan().trigger()
         ft = next(self.getFeatures(QGisCore.QgsFeatureRequest(fid)))
 
-        self.task = RasterBlockWrapper(self.rasterLayer, 1, ft.geometry())
+        self.task = RasterBlockWrapperTask(self.rasterLayer, 1, ft.geometry())
         self.task.completed.connect(drawPixelisedFeature)
         QGisCore.QgsApplication.taskManager().addTask(self.task)
 
