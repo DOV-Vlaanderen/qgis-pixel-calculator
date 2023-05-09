@@ -1,0 +1,147 @@
+import PyQt5.QtCore as QtCore
+import qgis.core as QGisCore
+
+
+class RasterBlockWrapperTask(QGisCore.QgsTask):
+    """Class to align a vector geometry to the grid of a raster layer."""
+
+    completed = QtCore.pyqtSignal(object)
+
+    def __init__(self, rasterLayer, band, geometry):
+        """Initialisation.
+        Aligns the given geometry to the grid of the raster layer.
+        Parameters
+        ----------
+        rasterLayer : QGisCore.QgsRasterLayer
+            The raster layer to use as the grid to align the geometry to.
+        band : int
+            The band of the rasterlayer to use to calculate summary statistics
+            for the new geometry.
+        geometry : QGisCore.QgsGeometry
+            Geometry to align to the raster grid.
+        """
+        super().__init__('Pixelwaarde berekenen', QGisCore.QgsTask.CanCancel)
+        self.setDependentLayers([rasterLayer])
+
+        self.rasterLayer = rasterLayer
+        self.band = band
+        self.geometry = geometry
+
+        self.geomBbox = self.geometry.boundingBox()
+
+        self.pixelSizeX = self.rasterLayer.rasterUnitsPerPixelX()
+        self.pixelSizeY = self.rasterLayer.rasterUnitsPerPixelY()
+        self.pixelArea = self.pixelSizeX*self.pixelSizeY
+
+        self._buffer = max(self.pixelSizeX, self.pixelSizeY)
+        self.geomBbox = self.geomBbox.buffered(self._buffer)
+
+        self.blockBbox = self._alignRectangleToGrid(self.geomBbox)
+        self.blockWidth = int(self.blockBbox.width()/self.pixelSizeX)
+        self.blockHeight = int(self.blockBbox.height()/self.pixelSizeY)
+        self.block = self.rasterLayer.dataProvider().block(self.band,
+                                                           self.blockBbox,
+                                                           self.blockWidth,
+                                                           self.blockHeight)
+
+        self.stats = {}
+        self.newGeometry = None
+
+    def _alignRectangleToGrid(self, rect):
+        """Aligns the given rectangle to the grid of the raster layer.
+        Parameters
+        ----------
+        rect : QGisCore.QgsRectangle
+            Rectangle to align.
+        Returns
+        -------
+        QGisCore.QgsRectangle
+            New rectangle, aligned to the grid of the raster layer.
+        """
+        rasterExtent = self.rasterLayer.extent()
+        newRect = QGisCore.QgsRectangle()
+        newRect.setXMinimum(rasterExtent.xMinimum() + (round(
+            (rect.xMinimum()-rasterExtent.xMinimum()) / self.pixelSizeX) *
+            self.pixelSizeX))
+        newRect.setYMinimum(rasterExtent.yMinimum() + (round(
+            (rect.yMinimum()-rasterExtent.yMinimum()) / self.pixelSizeY) *
+            self.pixelSizeY))
+        newRect.setXMaximum(newRect.xMinimum() + (int(
+            rect.width()/self.pixelSizeX)*self.pixelSizeX))
+        newRect.setYMaximum(newRect.yMinimum() + (int(
+            rect.height()/self.pixelSizeY)*self.pixelSizeY))
+        return newRect
+
+    def _rasterCellMatchesGeometry(self, rect):
+        """Check whether a given raster cell belongs to the geometry.
+        In casu: a raster cell belongs to the geometry if at least 50 percent
+        of the area of the raster cell falls inside the geometry.
+        Parameters
+        ----------
+        rect : QGisCore.QgsRectangle
+            The rectangle representing the raster cell.
+        Returns
+        -------
+        boolean
+            `True` if the raster cell belongs to the geometry, `False`
+            otherwise.
+        """
+        # 50% overlap
+        return self.geometry.intersection(
+            QGisCore.QgsGeometry.fromRect(rect)).area() >= (self.pixelArea*0.5)
+
+    def run(self):
+        """Calculate the new, aligned, geometry.
+        Loop over all raster cells within the bounding box of the geometry and
+        check for each of them if they should be part of the new geometry.
+        Build a new QgsGeometry from the matching cells.
+        Also builds a dictionary of statistics for the new QgsGeometry: listing
+        the count, sum and average (mean) values of the raster cells it
+        contains.
+        """
+        valSum = 0
+        valCnt = 0
+
+        progress_done = 0
+        progress_todo = self.blockWidth * self.blockHeight
+
+        noData = None
+        if self.rasterLayer.dataProvider().sourceHasNoDataValue(self.band):
+            noData = self.rasterLayer.dataProvider().sourceNoDataValue(self.band)
+
+        for r in range(self.blockHeight):
+            for c in range(self.blockWidth):
+                cellRect = QGisCore.QgsRectangle()
+                cellRect.setXMinimum(self.blockBbox.xMinimum() +
+                                     (c*self.pixelSizeX))
+                cellRect.setYMinimum(self.blockBbox.yMaximum() -
+                                     (r*self.pixelSizeY)-self.pixelSizeY)
+                cellRect.setXMaximum(self.blockBbox.xMinimum() +
+                                     (c*self.pixelSizeX)+self.pixelSizeX)
+                cellRect.setYMaximum(self.blockBbox.yMaximum() -
+                                     (r*self.pixelSizeY))
+                if self._rasterCellMatchesGeometry(cellRect):
+                    value = self.block.value(r, c)
+
+                    if noData and value == noData:
+                        continue
+
+                    valSum += self.block.value(r, c)
+                    valCnt += 1
+                    if not self.newGeometry:
+                        self.newGeometry = QGisCore.QgsGeometry.fromRect(
+                            cellRect)
+                    else:
+                        self.newGeometry = self.newGeometry.combine(
+                            QGisCore.QgsGeometry.fromRect(cellRect))
+
+                progress_done += 1
+                self.setProgress((progress_done/progress_todo) * 100)
+
+        if valCnt > 0:
+            self.stats['sum'] = valSum
+            self.stats['count'] = valCnt
+            self.stats['avg'] = valSum/float(valCnt)
+
+        self.completed.emit((self.newGeometry, self.stats))
+        return True
