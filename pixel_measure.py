@@ -3,10 +3,12 @@ import PyQt5.QtGui as QtGui
 import qgis.core as QGisCore
 
 
-class RasterBlockWrapper(QtCore.QObject):
+class RasterBlockWrapper(QGisCore.QgsTask):
     """Class to align a vector geometry to the grid of a raster layer."""
 
-    def __init__(self, rasterLayer, band, geometry):
+    taskFinished = QtCore.pyqtSignal(object)
+
+    def __init__(self, rasterLayer, band, geometry, callback):
         """Initialisation.
         Aligns the given geometry to the grid of the raster layer.
         Parameters
@@ -19,9 +21,14 @@ class RasterBlockWrapper(QtCore.QObject):
         geometry : QGisCore.QgsGeometry
             Geometry to align to the raster grid.
         """
+        super().__init__('Pixelwaarde berekenen', QGisCore.QgsTask.CanCancel)
+        self.setDependentLayers([rasterLayer])
+
         self.rasterLayer = rasterLayer
         self.band = band
         self.geometry = geometry
+        self.callback = callback
+
         self.geomBbox = self.geometry.boundingBox()
 
         self.pixelSizeX = self.rasterLayer.rasterUnitsPerPixelX()
@@ -39,10 +46,8 @@ class RasterBlockWrapper(QtCore.QObject):
                                                            self.blockWidth,
                                                            self.blockHeight)
 
-        self.newGeometry = None
         self.stats = {}
-
-        self._process()
+        self.newGeometry = None
 
     def _alignRectangleToGrid(self, rect):
         """Aligns the given rectangle to the grid of the raster layer.
@@ -87,7 +92,7 @@ class RasterBlockWrapper(QtCore.QObject):
         return self.geometry.intersection(
             QGisCore.QgsGeometry.fromRect(rect)).area() >= (self.pixelArea*0.5)
 
-    def _process(self):
+    def run(self):
         """Calculate the new, aligned, geometry.
         Loop over all raster cells within the bounding box of the geometry and
         check for each of them if they should be part of the new geometry.
@@ -98,6 +103,9 @@ class RasterBlockWrapper(QtCore.QObject):
         """
         valSum = 0
         valCnt = 0
+
+        progress_done = 0
+        progress_todo = self.blockWidth * self.blockHeight
 
         noData = None
         if self.rasterLayer.dataProvider().sourceHasNoDataValue(self.band):
@@ -129,39 +137,16 @@ class RasterBlockWrapper(QtCore.QObject):
                         self.newGeometry = self.newGeometry.combine(
                             QGisCore.QgsGeometry.fromRect(cellRect))
 
+                progress_done += 1
+                self.setProgress((progress_done/progress_todo) * 100)
+
         if valCnt > 0:
-            self.stats.clear()
             self.stats['sum'] = valSum
             self.stats['count'] = valCnt
             self.stats['avg'] = valSum/float(valCnt)
 
-    def getRasterizedGeometry(self):
-        """Get the rasterized, aligned, version of the input geometry.
-        Returns
-        -------
-        QGisCore.QgsGeometry
-            Aligned version of the input geometry.
-        """
-        return self.newGeometry
-
-    def getStats(self):
-        """Get the summary statistics of the raster cells of the new geometry.
-        Returns
-        -------
-        dict
-            Dictionary containing the summary statistics, with values for
-            'count', 'sum' and 'avg'.
-        """
-        return self.stats
-
-    def isEmpty(self):
-        """Check if the aligned geometry is available.
-        Returns
-        -------
-        boolean
-            `True` if the new geometry is available, `False` otherwise.
-        """
-        return self.newGeometry is None
+        self.taskFinished.emit((self.newGeometry, self.stats))
+        return True
 
 
 class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
@@ -265,22 +250,27 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
         fid : int
             Feature id of the added feature.
         """
+        def drawPixelisedFeature(result):
+            geometry, stats = result
+            if geometry is not None:
+                self.changeGeometry(fid, geometry)
+
+                label_settings = self.labeling().settings()
+                label_settings.fieldName = "%0.2f" % stats['avg']
+                label_settings.isExpression = True
+
+                self.labeling().setSettings(label_settings)
+                self.triggerRepaint()
+            else:
+                self.editBuffer().deleteFeature(fid)
+
+            self.commitChanges()
+
         ft = next(self.getFeatures(QGisCore.QgsFeatureRequest(fid)))
-        block = RasterBlockWrapper(self.rasterLayer, 1, ft.geometry())
 
-        if not block.isEmpty():
-            self.changeGeometry(fid, block.getRasterizedGeometry())
-
-            label_settings = self.labeling().settings()
-            label_settings.fieldName = "%0.2f" % block.getStats()['avg']
-            label_settings.isExpression = True
-
-            self.labeling().setSettings(label_settings)
-            self.triggerRepaint()
-        else:
-            self.editBuffer().deleteFeature(fid)
-
-        self.commitChanges()
+        task = RasterBlockWrapper(self.rasterLayer, 1, ft.geometry(), drawPixelisedFeature)
+        task.taskFinished.connect(drawPixelisedFeature)
+        QGisCore.QgsApplication.taskManager().addTask(task)
 
 
 class PixelMeasureAction(QtGui.QAction):
