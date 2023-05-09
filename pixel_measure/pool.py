@@ -8,7 +8,7 @@ class WorkerThreadPool:
     in parallel.
     """
 
-    def __init__(self, worker_count=None, aggregation_function=None):
+    def __init__(self, worker_count=None, progress_function=None, aggregation_function=None):
         """Initialisation.
 
         Set up the pool and start all workers.
@@ -25,7 +25,14 @@ class WorkerThreadPool:
         self.result_queue = Queue()
 
         for i in range(self.worker_count):
-            self.workers.append(WorkerThread(self.input_queue, self.result_queue, aggregation_function))
+            self.workers.append(
+                WorkerThread(
+                    self.input_queue,
+                    self.result_queue,
+                    progress_function,
+                    aggregation_function
+                )
+            )
 
         self._start()
 
@@ -130,7 +137,7 @@ class WorkerResult:
 class WorkerThread(Thread):
     """Worker thread using a local Session to execute functions. """
 
-    def __init__(self, input_queue, result_queue, aggregation_function):
+    def __init__(self, input_queue, result_queue, progress_function, aggregation_function):
         """Initialisation.
 
         Bind to the input queue and create a Session.
@@ -146,6 +153,8 @@ class WorkerThread(Thread):
         super().__init__()
         self.input_queue = input_queue
         self.result_queue = result_queue
+
+        self.progress_function = progress_function
 
         self.aggregation_function = aggregation_function
         if self.aggregation_function:
@@ -166,6 +175,9 @@ class WorkerThread(Thread):
 
                 if res.get_result():
                     aggregate = self.aggregation_function(aggregate, res.get_result())
+
+                if self.progress_function:
+                    self.progress_function()
 
             thread_result = WorkerResult()
             thread_result.set_result(aggregate)
@@ -192,5 +204,8 @@ class WorkerThread(Thread):
                         self.temp_result_queue.put(r)
                     else:
                         self.result_queue.put(r)
+                        if self.progress_function:
+                            self.progress_function()
+
             except Empty:
                 pass

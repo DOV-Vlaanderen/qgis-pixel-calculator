@@ -1,3 +1,4 @@
+from multiprocessing import Lock
 import PyQt5.QtCore as QtCore
 import qgis.core as QGisCore
 
@@ -106,6 +107,10 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         valSum = 0
         valCnt = 0
 
+        self.progressDone = 0
+        self.progressTodo = self.blockHeight * self.blockWidth * 2
+        self.lock = Lock()
+
         noData = None
         if self.rasterLayer.dataProvider().sourceHasNoDataValue(self.band):
             noData = self.rasterLayer.dataProvider().sourceNoDataValue(self.band)
@@ -138,8 +143,14 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
 
             return aggregate
 
-        processPixelPool = WorkerThreadPool()
-        aggregateGeomPool = WorkerThreadPool(aggregation_function=aggregateGeometry)
+        def progressTracker():
+            with self.lock:
+                self.progressDone += 1
+                self.setProgress((self.progressDone / self.progressTodo) * 100)
+
+        processPixelPool = WorkerThreadPool(progress_function=progressTracker)
+        aggregateGeomPool = WorkerThreadPool(
+            progress_function=progressTracker, aggregation_function=aggregateGeometry)
 
         for r in range(self.blockHeight):
             for c in range(self.blockWidth):
