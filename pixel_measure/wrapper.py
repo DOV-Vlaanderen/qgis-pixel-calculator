@@ -1,6 +1,8 @@
 import PyQt5.QtCore as QtCore
 import qgis.core as QGisCore
 
+from .pool import WorkerThreadPool
+
 
 class RasterBlockWrapperTask(QGisCore.QgsTask):
     """Class to align a vector geometry to the grid of a raster layer."""
@@ -111,38 +113,56 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         if self.rasterLayer.dataProvider().sourceHasNoDataValue(self.band):
             noData = self.rasterLayer.dataProvider().sourceNoDataValue(self.band)
 
+        def processPixel(r, c):
+            cellRect = QGisCore.QgsRectangle()
+            cellRect.setXMinimum(self.blockBbox.xMinimum() +
+                                 (c*self.pixelSizeX))
+            cellRect.setYMinimum(self.blockBbox.yMaximum() -
+                                 (r*self.pixelSizeY)-self.pixelSizeY)
+            cellRect.setXMaximum(self.blockBbox.xMinimum() +
+                                 (c*self.pixelSizeX)+self.pixelSizeX)
+            cellRect.setYMaximum(self.blockBbox.yMaximum() -
+                                 (r*self.pixelSizeY))
+            if self._rasterCellMatchesGeometry(cellRect):
+                value = self.block.value(r, c)
+
+                if noData and value == noData:
+                    return None, None
+
+                return QGisCore.QgsGeometry.fromRect(cellRect), value
+
+            return None, None
+
+        processPixelPool = WorkerThreadPool()
+
         for r in range(self.blockHeight):
             for c in range(self.blockWidth):
                 if self.shouldCancel:
-                    self.failed.emit()
-                    return False
+                    break
 
-                cellRect = QGisCore.QgsRectangle()
-                cellRect.setXMinimum(self.blockBbox.xMinimum() +
-                                     (c*self.pixelSizeX))
-                cellRect.setYMinimum(self.blockBbox.yMaximum() -
-                                     (r*self.pixelSizeY)-self.pixelSizeY)
-                cellRect.setXMaximum(self.blockBbox.xMinimum() +
-                                     (c*self.pixelSizeX)+self.pixelSizeX)
-                cellRect.setYMaximum(self.blockBbox.yMaximum() -
-                                     (r*self.pixelSizeY))
-                if self._rasterCellMatchesGeometry(cellRect):
-                    value = self.block.value(r, c)
+                processPixelPool.execute(processPixel, (r, c))
 
-                    if noData and value == noData:
-                        continue
+            if self.shouldCancel:
+                break
 
-                    valSum += self.block.value(r, c)
-                    valCnt += 1
-                    if not self.newGeometry:
-                        self.newGeometry = QGisCore.QgsGeometry.fromRect(
-                            cellRect)
-                    else:
-                        self.newGeometry = self.newGeometry.combine(
-                            QGisCore.QgsGeometry.fromRect(cellRect))
+        for res in processPixelPool.join():
+            if self.shouldCancel:
+                self.failed.emit()
+                return False
 
-                progress_done += 1
-                self.setProgress((progress_done/progress_todo) * 100)
+            rect, value = res.get_result()
+            progress_done += 1
+
+            if rect is not None and value is not None:
+                valSum += value
+                valCnt += 1
+
+                if not self.newGeometry:
+                    self.newGeometry = rect
+                else:
+                    self.newGeometry = self.newGeometry.combine(rect)
+
+            self.setProgress((progress_done/progress_todo) * 100)
 
         if valCnt > 0:
             self.stats['sum'] = valSum
