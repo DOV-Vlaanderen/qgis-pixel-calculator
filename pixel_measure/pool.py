@@ -21,7 +21,7 @@ class WorkerThreadPool:
         self.worker_count = worker_count or os.cpu_count()
 
         self.workers = []
-        self.input_queue = Queue(maxsize=100)
+        self.input_queue = Queue()
         self.result_queue = Queue()
 
         for i in range(self.worker_count):

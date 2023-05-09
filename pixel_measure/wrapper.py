@@ -137,16 +137,16 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
 
         def aggregateGeometry(aggregate, item):
             if aggregate is None:
-                aggregate = item
-            elif item is not None:
-                aggregate = aggregate.combine(item)
+                return item
+
+            if item is not None:
+                return aggregate.combine(item)
 
             return aggregate
 
         def progressTracker():
-            with self.lock:
-                self.progressDone += 1
-                self.setProgress((self.progressDone / self.progressTodo) * 100)
+            self.progressDone += 1
+            self.setProgress((self.progressDone / self.progressTodo) * 100)
 
         def cancelFunction():
             return self.shouldCancel
@@ -177,6 +177,8 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
                 valCnt += 1
 
                 aggregateGeomPool.execute(lambda x: x, (rect,))
+            else:
+                progressTracker()
 
         for res in aggregateGeomPool.join():
             if self.shouldCancel:
