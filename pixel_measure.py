@@ -29,7 +29,7 @@ class RasterBlockWrapper(QtCore.QObject):
         self.pixelArea = self.pixelSizeX*self.pixelSizeY
 
         self._buffer = max(self.pixelSizeX, self.pixelSizeY)
-        self.geomBbox = self.geomBbox.buffer(self._buffer)
+        self.geomBbox = self.geomBbox.buffered(self._buffer)
 
         self.blockBbox = self._alignRectangleToGrid(self.geomBbox)
         self.blockWidth = int(self.blockBbox.width()/self.pixelSizeX)
@@ -100,8 +100,8 @@ class RasterBlockWrapper(QtCore.QObject):
         valCnt = 0
 
         noData = None
-        if self.rasterLayer.dataProvider().srcHasNoDataValue(self.band):
-            noData = self.rasterLayer.dataProvider().srcNoDataValue(self.band)
+        if self.rasterLayer.dataProvider().sourceHasNoDataValue(self.band):
+            noData = self.rasterLayer.dataProvider().sourceNoDataValue(self.band)
 
         for r in range(self.blockHeight):
             for c in range(self.blockWidth):
@@ -191,49 +191,67 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
             Whether to load the default style.
         """
         QGisCore.QgsVectorLayer.__init__(self, path, baseName, providerLib,
-                                         loadDefaultStyleFlag)
+                                         QGisCore.QgsVectorLayer.LayerOptions(
+                                             loadDefaultStyleFlag, readExtentFromXml=False))
         self.rasterLayer = rasterLayer
         self.main = main
 
-        props = self.rendererV2().symbol().symbolLayer(0).properties()
+        self._set_scaleBasedVisibility()
+        self._set_labeling()
+
+        self.editingStarted.connect(self._cb_editingStarted)
+        self.beforeCommitChanges.connect(self._cb_beforeCommitChanges)
+
+    def _set_scaleBasedVisibility(self):
+        if self.rasterLayer.hasScaleBasedVisibility():
+            self.setScaleBasedVisibility(True)
+            self.setMinimumScale(self.rasterLayer.minimumScale())
+            self.setMaximumScale(self.rasterLayer.maximumScale())
+        else:
+            self.setScaleBasedVisibility(False)
+
+    def _set_labeling(self):
+        props = self.renderer().symbol().symbolLayer(0).properties()
         props['color'] = '255,255,255,64'
         props['outline_color'] = '0,0,0,255'
         props['outline_width'] = '1'
-        self.rendererV2().setSymbol(
-            QGisCore.QgsFillSymbolV2.createSimple(props))
+        self.renderer().setSymbol(
+            QGisCore.QgsFillSymbol.createSimple(props))
 
-        self.setCustomProperty("labeling", "pal")
-        self.setCustomProperty("labeling/isExpression", True)
-        self.setCustomProperty("labeling/enabled", True)
-        self.setCustomProperty("labeling/fontSize", "12")
-        self.setCustomProperty("labeling/fontWeight", "75")
-        self.setCustomProperty("labeling/displayAll", True)
-        self.setCustomProperty("labeling/bufferColorA", 255)
-        self.setCustomProperty("labeling/bufferColorR", 255)
-        self.setCustomProperty("labeling/bufferColorG", 255)
-        self.setCustomProperty("labeling/bufferColorB", 255)
-        self.setCustomProperty("labeling/bufferSize", "1.5")
+        label_settings = QGisCore.QgsPalLayerSettings()
+        label_settings.enabled = True
+        label_settings.placement = QGisCore.QgsPalLayerSettings.AroundPoint
 
-        QtCore.QObject.connect(self, QtCore.SIGNAL('editingStarted()'),
-                               self._cb_editingStarted)
-        QtCore.QObject.connect(self, QtCore.SIGNAL('beforeCommitChanges()'),
-                               self._cb_beforeCommitChanges)
+        label_format = QGisCore.QgsTextFormat()
+        label_format.setSize(12)
+        label_format.setForcedBold(True)
+        label_format.setColor(QtGui.QColor(0, 0, 0, 255))
+
+        label_buffer = QGisCore.QgsTextBufferSettings()
+        label_buffer.setEnabled(True)
+        label_buffer.setSize(1.5)
+        label_buffer.setColor(QtGui.QColor(255, 255, 255, 255))
+        label_format.setBuffer(
+            label_buffer
+        )
+        label_settings.setFormat(
+            label_format
+        )
+
+        self.setLabeling(QGisCore.QgsVectorLayerSimpleLabeling(label_settings))
+        self.setLabelsEnabled(True)
 
     def _cb_editingStarted(self):
         """Connect the featureAdded signal.
         Callback for the 'editingStarted' event.
         """
-        QtCore.QObject.connect(self.editBuffer(),
-                               QtCore.SIGNAL('featureAdded(QgsFeatureId)'),
-                               self._cb_featureAdded)
+        self.editBuffer().featureAdded.connect(self._cb_featureAdded)
 
     def _cb_beforeCommitChanges(self):
         """Disconnect the featureAdded signal.
         Callback for the 'beforeCommitChanges' event.
         """
-        QtCore.QObject.disconnect(self.editBuffer(),
-                                  QtCore.SIGNAL('featureAdded(QgsFeatureId)'),
-                                  self._cb_featureAdded)
+        self.editBuffer().featureAdded.disconnect(self._cb_featureAdded)
 
     def _cb_featureAdded(self, fid):
         """Pixelise the feature drawn.
@@ -241,18 +259,24 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
         and updating the geometry of the feature. Also add the average
         (arithmetic mean) value of the cells of the newly created geometry as
         a label.
+
         Parameters
         ----------
         fid : int
             Feature id of the added feature.
         """
-        ft = self.getFeatures(QGisCore.QgsFeatureRequest(fid)).next()
+        ft = next(self.getFeatures(QGisCore.QgsFeatureRequest(fid)))
         block = RasterBlockWrapper(self.rasterLayer, 1, ft.geometry())
 
         if not block.isEmpty():
             self.changeGeometry(fid, block.getRasterizedGeometry())
-            self.setCustomProperty("labeling/fieldName", "%0.2f" %
-                                   block.getStats()['avg'])
+
+            label_settings = self.labeling().settings()
+            label_settings.fieldName = "%0.2f" % block.getStats()['avg']
+            label_settings.isExpression = True
+
+            self.labeling().setSettings(label_settings)
+            self.triggerRepaint()
         else:
             self.editBuffer().deleteFeature(fid)
 
@@ -261,71 +285,58 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
 
 class PixelMeasureAction(QtGui.QAction):
     """Class representing the action to start the pixel measure.
-    Used as a toolbar button.
+    Used as a menu item and toolbar button.
     """
 
-    def __init__(self, main, parent, rasterLayerName):
+    def __init__(self, main, parent):
         """Initialisation.
         Parameters
         ----------
-        main : erosiebezwaren.Erosiebezwaren
+        main : PixelCalculator
             Instance of main class.
         parent : QtGui.QWidget
             Widget used as parent widget for the action.
-        rasterLayerName : str
-            Name of the raster layer in the project to measure.
         """
         self.main = main
-        self.rasterLayerName = rasterLayerName
         QtGui.QAction.__init__(self,
-                               QtGui.QIcon(':/icons/icons/pixelmeasure.png'),
+                               QtGui.QIcon(':/plugins/pixel_calculator/icon.png'),
                                'Bereken pixelwaarden',
                                parent)
 
         self.mapCanvas = self.main.iface.mapCanvas()
-        QtCore.QObject.connect(self.mapCanvas,
-                               QtCore.SIGNAL('extentsChanged()'),
-                               self.populateVisible)
+        self.mapCanvas.extentsChanged.connect(self.populateVisible)
 
-        self.rasterLayer = self.main.utils.getLayerByName(self.rasterLayerName)
-        self.rasterLayerActive = False
+        self.main.iface.currentLayerChanged.connect(self.populateApplicable)
+
+        self.rasterLayer = None
         self.previousMapTool = None
         self.layer = None
 
+        self.populateApplicable()
+
         self.setCheckable(True)
-        QtCore.QObject.connect(self, QtCore.SIGNAL('triggered(bool)'),
-                               self.activate)
+        self.triggered.connect(self.activate)
+
+    def populateApplicable(self):
+        active_layer = self.main.iface.activeLayer()
+        if isinstance(active_layer, QGisCore.QgsRasterLayer) or active_layer == self.layer:
+            self.rasterLayer = active_layer
+        else:
+            self.rasterLayer = None
+        self.populateVisible()
 
     def populateVisible(self):
         """Show or hide the action based on the visibility of the raster layer.
         Only show the action in the toolbar if the corresponding raster layer
         is visible too.
         """
-        if not self.rasterLayer:
-            self.rasterLayer = self.main.utils.getLayerByName(
-                self.rasterLayerName)
-
-        if self.rasterLayer and self.rasterLayerActive and \
+        if self.rasterLayer and \
             ((self.rasterLayer.hasScaleBasedVisibility() and
-              self.rasterLayer.minimumScale() <= self.mapCanvas.scale() <
-              self.rasterLayer.maximumScale()) or
-             (not self.rasterLayer.hasScaleBasedVisibility())):
-            self.setVisible(True)
+             self.rasterLayer.isInScaleRange(self.mapCanvas.scale())) or
+                not self.rasterLayer.hasScaleBasedVisibility()):
+            self.setEnabled(True)
         else:
-            self.setVisible(False)
-
-    def setRasterLayerActive(self, active):
-        """Set the visibility status of the raster layer.
-        Controls the visibility of this Action accordingly by calling
-        populate(). This should ideally be set by handling the appropriate
-        event of the legend panel.
-        Parameters
-        ----------
-        active : boolean
-            The new status of the raster layer.
-        """
-        self.rasterLayerActive = active
-        self.populateVisible()
+            self.setEnabled(False)
 
     def activate(self, checked):
         """Activate or deactive the measurement action.
@@ -348,8 +359,7 @@ class PixelMeasureAction(QtGui.QAction):
                                      path='Multipolygon?crs=epsg:31370',
                                      baseName='Pixelberekening',
                                      providerLib='memory')
-        self.layer = QGisCore.QgsMapLayerRegistry.instance().addMapLayer(
-            layer, False)
+        self.layer = QGisCore.QgsProject.instance().addMapLayer(layer, False)
         QGisCore.QgsProject.instance().layerTreeRoot().insertLayer(0, layer)
         self.main.iface.setActiveLayer(self.layer)
         self.main.iface.actionToggleEditing().trigger()
@@ -362,17 +372,15 @@ class PixelMeasureAction(QtGui.QAction):
         self.setChecked(False)
         if self.layer:
             try:
-                QGisCore.QgsMapLayerRegistry.instance().removeMapLayer(
+                QGisCore.QgsProject.instance().removeMapLayer(
                     self.layer.id())
+                self.main.iface.mapCanvas().refresh()
             except RuntimeError:
                 pass
             self.layer = None
 
     def deactivate(self):
         """Deactivate by disconnecting signals and stopping measurement."""
-        QtCore.QObject.disconnect(
-            self, QtCore.SIGNAL('triggered(bool)'), self.startMeasure)
-        QtCore.QObject.connect(
-            self.mapCanvas, QtCore.SIGNAL('extentsChanged()'),
-            self.populateVisible)
+        self.triggered.disconnect(self.startMeasure)
+        self.mapCanvas.extentsChanged.connect(self.populateVisible)
         self.stopMeasure()
