@@ -6,6 +6,7 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
     """Class to align a vector geometry to the grid of a raster layer."""
 
     completed = QtCore.pyqtSignal(object)
+    failed = QtCore.pyqtSignal()
 
     def __init__(self, rasterLayer, band, geometry):
         """Initialisation.
@@ -22,6 +23,7 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         """
         super().__init__('Pixelwaarde berekenen', QGisCore.QgsTask.CanCancel)
         self.setDependentLayers([rasterLayer])
+        self.shouldCancel = False
 
         self.rasterLayer = rasterLayer
         self.band = band
@@ -111,6 +113,10 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
 
         for r in range(self.blockHeight):
             for c in range(self.blockWidth):
+                if self.shouldCancel:
+                    self.failed.emit()
+                    return False
+
                 cellRect = QGisCore.QgsRectangle()
                 cellRect.setXMinimum(self.blockBbox.xMinimum() +
                                      (c*self.pixelSizeX))
@@ -145,3 +151,6 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
 
         self.completed.emit((self.newGeometry, self.stats))
         return True
+
+    def cancel(self):
+        self.shouldCancel = True

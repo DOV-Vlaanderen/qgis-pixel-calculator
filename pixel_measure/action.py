@@ -19,6 +19,8 @@ class PixelMeasureAction(QtGui.QAction):
             Widget used as parent widget for the action.
         """
         self.main = main
+        self.iface = self.main.iface
+
         QtGui.QAction.__init__(self,
                                QtGui.QIcon(':/plugins/pixel_calculator/icon.png'),
                                'Bereken pixelwaarden',
@@ -76,7 +78,7 @@ class PixelMeasureAction(QtGui.QAction):
         """Start measuring.
         Add a PixelisedVectorLayer to the project and start drawing.
         """
-        layer = PixelisedVectorLayer(self.main, rasterLayer=self.rasterLayer,
+        layer = PixelisedVectorLayer(self, rasterLayer=self.rasterLayer,
                                      path='Multipolygon?crs=epsg:31370',
                                      baseName='Pixelberekening',
                                      providerLib='memory')
