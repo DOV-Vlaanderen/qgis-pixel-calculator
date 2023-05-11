@@ -11,11 +11,14 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
     completed = QtCore.pyqtSignal(object)
     failed = QtCore.pyqtSignal()
 
-    def __init__(self, rasterLayer, band, geometry):
+    def __init__(self, main, rasterLayer, band, geometry):
         """Initialisation.
         Aligns the given geometry to the grid of the raster layer.
+
         Parameters
         ----------
+        main : PixelCalculator
+            Instance of main class.
         rasterLayer : QGisCore.QgsRasterLayer
             The raster layer to use as the grid to align the geometry to.
         band : int
@@ -24,7 +27,7 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         geometry : QGisCore.QgsGeometry
             Geometry to align to the raster grid.
         """
-        super().__init__('Pixelwaarde berekenen', QGisCore.QgsTask.CanCancel)
+        super().__init__(main.tr('Pixelwaarde berekenen'), QGisCore.QgsTask.CanCancel)
         self.setDependentLayers([rasterLayer])
         self.shouldCancel = False
 

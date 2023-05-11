@@ -131,7 +131,7 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
         self.action.iface.actionPan().trigger()
         ft = next(self.getFeatures(QGisCore.QgsFeatureRequest(fid)))
 
-        self.task = RasterBlockWrapperTask(self.rasterLayer, 1, ft.geometry())
+        self.task = RasterBlockWrapperTask(self.action.main, self.rasterLayer, 1, ft.geometry())
 
         self.task.completed.connect(drawPixelisedFeature)
         self.task.failed.connect(handleFailed)
