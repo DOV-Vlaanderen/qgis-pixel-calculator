@@ -8,17 +8,16 @@
         <source>Pixel&amp;Calculator</source>
         <translation>Pixel&amp;Calculator</translation>
     </message>
-</context>
-<context>
-    <name>main</name>
+    <message>
+        <location filename="../pixel_measure/action.py" line="75"/>
+        <source>Selecteer een rasterlaag om een berekening te kunnen starten.</source>
+        <translation>Select a raster layer to start a calculation.</translation>
+    </message>
     <message>
         <location filename="../pixel_measure/wrapper.py" line="30"/>
         <source>Pixelwaarde berekenen</source>
         <translation>Calculating pixelvalue</translation>
     </message>
-</context>
-<context>
-    <name>self.main</name>
     <message>
         <location filename="../pixel_measure/action.py" line="60"/>
         <source>Berekening actief. Beëindig de huidige berekening.</source>
