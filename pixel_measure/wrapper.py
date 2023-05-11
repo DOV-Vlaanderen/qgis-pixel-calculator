@@ -1,9 +1,12 @@
+from multiprocessing import Lock
 import PyQt5.QtCore as QtCore
 import qgis.core as QGisCore
 
+from .pool import WorkerThreadPool
+
 
 class RasterBlockWrapperTask(QGisCore.QgsTask):
-    """Class to align a vector geometry to the grid of a raster layer."""
+    """Task to align a vector geometry to the grid of a raster layer."""
 
     completed = QtCore.pyqtSignal(object)
     failed = QtCore.pyqtSignal()
@@ -38,23 +41,28 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         self._buffer = max(self.pixelSizeX, self.pixelSizeY)
         self.geomBbox = self.geomBbox.buffered(self._buffer)
 
-        self.blockBbox = self._alignRectangleToGrid(self.geomBbox)
-        self.blockWidth = int(self.blockBbox.width()/self.pixelSizeX)
-        self.blockHeight = int(self.blockBbox.height()/self.pixelSizeY)
-        self.block = self.rasterLayer.dataProvider().block(self.band,
-                                                           self.blockBbox,
-                                                           self.blockWidth,
-                                                           self.blockHeight)
+        if self.geomBbox.intersects(self.rasterLayer.extent()):
+            self.blockBbox = self._alignRectangleToGrid(self.geomBbox)
+            self.blockWidth = int(self.blockBbox.width()/self.pixelSizeX)
+            self.blockHeight = int(self.blockBbox.height()/self.pixelSizeY)
+            self.block = self.rasterLayer.dataProvider().block(self.band,
+                                                               self.blockBbox,
+                                                               self.blockWidth,
+                                                               self.blockHeight)
+        else:
+            self.blockBbox = self.blockWidth = self.blockHeight = self.block = None
 
         self.stats = {}
         self.newGeometry = None
 
     def _alignRectangleToGrid(self, rect):
         """Aligns the given rectangle to the grid of the raster layer.
+
         Parameters
         ----------
         rect : QGisCore.QgsRectangle
             Rectangle to align.
+
         Returns
         -------
         QGisCore.QgsRectangle
@@ -104,53 +112,101 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         valSum = 0
         valCnt = 0
 
-        progress_done = 0
-        progress_todo = self.blockWidth * self.blockHeight
+        if self.block is None:
+            self.completed.emit((self.newGeometry, self.stats))
+            return True
+
+        self.progressDone = 0
+        self.progressTodo = self.blockHeight * self.blockWidth * 2
+        self.lock = Lock()
 
         noData = None
         if self.rasterLayer.dataProvider().sourceHasNoDataValue(self.band):
             noData = self.rasterLayer.dataProvider().sourceNoDataValue(self.band)
 
+        def processPixel(r, c):
+            cellRect = QGisCore.QgsRectangle()
+            cellRect.setXMinimum(self.blockBbox.xMinimum() +
+                                 (c*self.pixelSizeX))
+            cellRect.setYMinimum(self.blockBbox.yMaximum() -
+                                 (r*self.pixelSizeY)-self.pixelSizeY)
+            cellRect.setXMaximum(self.blockBbox.xMinimum() +
+                                 (c*self.pixelSizeX)+self.pixelSizeX)
+            cellRect.setYMaximum(self.blockBbox.yMaximum() -
+                                 (r*self.pixelSizeY))
+            if self._rasterCellMatchesGeometry(cellRect):
+                value = self.block.value(r, c)
+
+                if noData and value == noData:
+                    return None, None
+
+                return QGisCore.QgsGeometry.fromRect(cellRect), value
+
+            return None, None
+
+        def aggregateGeometry(aggregate, item):
+            if aggregate is None:
+                return item
+
+            if item is not None:
+                return aggregate.combine(item)
+
+            return aggregate
+
+        def progressTracker():
+            self.progressDone += 1
+            self.setProgress((self.progressDone / self.progressTodo) * 100)
+
+        def cancelFunction():
+            return self.shouldCancel
+
+        processPixelPool = WorkerThreadPool(progress_function=progressTracker)
+        aggregateGeomPool = WorkerThreadPool(
+            progress_function=progressTracker,
+            cancel_function=cancelFunction,
+            aggregation_function=aggregateGeometry)
+
         for r in range(self.blockHeight):
             for c in range(self.blockWidth):
                 if self.shouldCancel:
-                    self.failed.emit()
-                    return False
+                    break
 
-                cellRect = QGisCore.QgsRectangle()
-                cellRect.setXMinimum(self.blockBbox.xMinimum() +
-                                     (c*self.pixelSizeX))
-                cellRect.setYMinimum(self.blockBbox.yMaximum() -
-                                     (r*self.pixelSizeY)-self.pixelSizeY)
-                cellRect.setXMaximum(self.blockBbox.xMinimum() +
-                                     (c*self.pixelSizeX)+self.pixelSizeX)
-                cellRect.setYMaximum(self.blockBbox.yMaximum() -
-                                     (r*self.pixelSizeY))
-                if self._rasterCellMatchesGeometry(cellRect):
-                    value = self.block.value(r, c)
+                processPixelPool.execute(processPixel, (r, c))
 
-                    if noData and value == noData:
-                        continue
+            if self.shouldCancel:
+                break
 
-                    valSum += self.block.value(r, c)
-                    valCnt += 1
-                    if not self.newGeometry:
-                        self.newGeometry = QGisCore.QgsGeometry.fromRect(
-                            cellRect)
-                    else:
-                        self.newGeometry = self.newGeometry.combine(
-                            QGisCore.QgsGeometry.fromRect(cellRect))
+        for res in processPixelPool.join():
+            if self.shouldCancel:
+                self.failed.emit()
+                return False
 
-                progress_done += 1
-                self.setProgress((progress_done/progress_todo) * 100)
+            rect, value = res.get_result()
+
+            if rect is not None and value is not None:
+                valSum += value
+                valCnt += 1
+
+                aggregateGeomPool.execute(lambda x: x, (rect,))
+            else:
+                progressTracker()
+
+        for res in aggregateGeomPool.join():
+            if self.shouldCancel:
+                self.failed.emit()
+                return False
+
+            geom = res.get_result()
+            self.newGeometry = aggregateGeometry(self.newGeometry, geom)
 
         if valCnt > 0:
             self.stats['sum'] = valSum
             self.stats['count'] = valCnt
-            self.stats['avg'] = valSum/float(valCnt)
+            self.stats['mean'] = valSum/float(valCnt)
 
         self.completed.emit((self.newGeometry, self.stats))
         return True
 
     def cancel(self):
+        """Cancel the task."""
         self.shouldCancel = True

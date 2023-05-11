@@ -23,42 +23,55 @@ class PixelMeasureAction(QtGui.QAction):
 
         QtGui.QAction.__init__(self,
                                QtGui.QIcon(':/plugins/pixel_calculator/icon.png'),
-                               'Bereken pixelwaarden',
+                               'Bereken pixelwaarde',
                                parent)
 
         self.mapCanvas = self.main.iface.mapCanvas()
-        self.mapCanvas.extentsChanged.connect(self.populateVisible)
+        self.mapCanvas.extentsChanged.connect(self._populateVisible)
 
-        self.main.iface.currentLayerChanged.connect(self.populateApplicable)
+        self.main.iface.currentLayerChanged.connect(self._populateApplicable)
 
-        self.rasterLayer = None
         self.previousMapTool = None
+        self.rasterLayer = None
+        self.calculatedLayer = None
         self.layer = None
+        self.activeLayer = None
 
-        self.populateApplicable()
+        self._populateApplicable()
 
         self.setCheckable(True)
         self.triggered.connect(self.activate)
 
-    def populateApplicable(self):
-        active_layer = self.main.iface.activeLayer()
-        if isinstance(active_layer, QGisCore.QgsRasterLayer) or active_layer == self.layer:
-            self.rasterLayer = active_layer
+    def _populateApplicable(self):
+        """Save the active layer, set the raster layer if applicable and call _populateVisible()."""
+        self.active_layer = self.main.iface.activeLayer()
+        if isinstance(self.active_layer, QGisCore.QgsRasterLayer):
+            self.rasterLayer = self.active_layer
         else:
             self.rasterLayer = None
-        self.populateVisible()
+        self._populateVisible()
 
-    def populateVisible(self):
-        """Show or hide the action based on the visibility of the raster layer.
+    def _populateVisible(self):
+        """Enable or disable the action based on the visibility of the raster layer.
         Only show the action in the toolbar if the corresponding raster layer
         is visible too.
         """
-        if self.rasterLayer and \
+        if self.layer is not None:
+            self.setToolTip('Berekening actief. Beëindig de huidige berekening.')
+            self.setEnabled(True)
+        elif self.rasterLayer and \
             ((self.rasterLayer.hasScaleBasedVisibility() and
              self.rasterLayer.isInScaleRange(self.mapCanvas.scale())) or
                 not self.rasterLayer.hasScaleBasedVisibility()):
+            self.setToolTip(f"Bereken pixelwaarde voor laag '{self.rasterLayer.name()}'.")
             self.setEnabled(True)
+        elif self.rasterLayer and \
+                (self.rasterLayer.hasScaleBasedVisibility()
+                 and not self.rasterLayer.isInScaleRange(self.mapCanvas.scale())):
+            self.setToolTip(f"De geselecteerde laag '{self.rasterLayer.name()}' is niet zichtbaar op dit schaalniveau.")
+            self.setEnabled(False)
         else:
+            self.setToolTip('Selecteer een rasterlaag om een berekening te kunnen starten.')
             self.setEnabled(False)
 
     def activate(self, checked):
@@ -82,6 +95,7 @@ class PixelMeasureAction(QtGui.QAction):
                                      path='Multipolygon?crs=epsg:31370',
                                      baseName='Pixelberekening',
                                      providerLib='memory')
+        self.calculatedLayer = self.rasterLayer
         self.layer = QGisCore.QgsProject.instance().addMapLayer(layer, False)
         QGisCore.QgsProject.instance().layerTreeRoot().insertLayer(0, layer)
         self.main.iface.setActiveLayer(self.layer)
@@ -102,8 +116,13 @@ class PixelMeasureAction(QtGui.QAction):
                 pass
             self.layer = None
 
+            self.main.iface.setActiveLayer(self.calculatedLayer)
+            self.rasterLayer = None
+            self.calculatedLayer = None
+            self._populateApplicable()
+
     def deactivate(self):
         """Deactivate by disconnecting signals and stopping measurement."""
         self.triggered.disconnect(self.startMeasure)
-        self.mapCanvas.extentsChanged.connect(self.populateVisible)
+        self.mapCanvas.extentsChanged.connect(self._populateVisible)
         self.stopMeasure()

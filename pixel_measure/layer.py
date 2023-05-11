@@ -11,13 +11,13 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
     border of the grid cells of the rasterlayer.
     """
 
-    def __init__(self, main, rasterLayer, path=None, baseName=None,
+    def __init__(self, action, rasterLayer, path=None, baseName=None,
                  providerLib=None, loadDefaultStyleFlag=True):
         """Initialisation.
         Parameters
         ----------
-        main : erosiebezwaren.Erosiebezwaren
-            Instance of main class.
+        action : PixelMeasureAction
+            Instance of PixelMeasureAction.
         rasterLayer : QGisCore.QgsRasterLayer
             Rasterlayer to use as the reference grid.
         path : str, optional
@@ -34,7 +34,7 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
                                          QGisCore.QgsVectorLayer.LayerOptions(
                                              loadDefaultStyleFlag, readExtentFromXml=False))
         self.rasterLayer = rasterLayer
-        self.main = main
+        self.action = action
 
         self._set_scaleBasedVisibility()
         self._set_labeling()
@@ -43,6 +43,7 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
         self.beforeCommitChanges.connect(self._cb_beforeCommitChanges)
 
     def _set_scaleBasedVisibility(self):
+        """Set the scaleBasedVisibility based on that of the raster layer we're drawing upon."""
         if self.rasterLayer.hasScaleBasedVisibility():
             self.setScaleBasedVisibility(True)
             self.setMinimumScale(self.rasterLayer.minimumScale())
@@ -51,6 +52,7 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
             self.setScaleBasedVisibility(False)
 
     def _set_labeling(self):
+        """Set the label formatting of the layer."""
         props = self.renderer().symbol().symbolLayer(0).properties()
         props['color'] = '255,255,255,64'
         props['outline_color'] = '0,0,0,255'
@@ -83,22 +85,19 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
 
     def _cb_editingStarted(self):
         """Connect the featureAdded signal.
-        Callback for the 'editingStarted' event.
         """
         self.editBuffer().featureAdded.connect(self._cb_featureAdded)
 
     def _cb_beforeCommitChanges(self):
         """Disconnect the featureAdded signal.
-        Callback for the 'beforeCommitChanges' event.
         """
         self.editBuffer().featureAdded.disconnect(self._cb_featureAdded)
 
     def _cb_featureAdded(self, fid):
         """Pixelise the feature drawn.
         Align the polygon to the raster grid by creating a RasterBlockWrapper
-        and updating the geometry of the feature. Also add the average
-        (arithmetic mean) value of the cells of the newly created geometry as
-        a label.
+        and updating the geometry of the feature. Also add the mean
+        value of the cells of the newly created geometry as a label.
 
         Parameters
         ----------
@@ -106,12 +105,13 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
             Feature id of the added feature.
         """
         def drawPixelisedFeature(result):
+            """Draw the result from the RasterBlockWrapper task in the layer."""
             geometry, stats = result
             if geometry is not None:
                 self.changeGeometry(fid, geometry)
 
                 label_settings = self.labeling().settings()
-                label_settings.fieldName = "%0.2f" % stats['avg']
+                label_settings.fieldName = "%0.2f" % stats['mean']
                 label_settings.isExpression = True
 
                 self.labeling().setSettings(label_settings)
@@ -122,11 +122,13 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
             self.commitChanges()
 
         def handleFailed():
+            """Handle the case where we got no result from the task, either because there is no overlap
+            with the raster or because the task was canceled."""
             self.editBuffer().deleteFeature(fid)
             self.commitChanges()
-            self.main.stopMeasure()
+            self.action.stopMeasure()
 
-        self.main.iface.actionPan().trigger()
+        self.action.iface.actionPan().trigger()
         ft = next(self.getFeatures(QGisCore.QgsFeatureRequest(fid)))
 
         self.task = RasterBlockWrapperTask(self.rasterLayer, 1, ft.geometry())
