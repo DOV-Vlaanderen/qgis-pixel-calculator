@@ -23,7 +23,7 @@ class PixelMeasureAction(QtGui.QAction):
 
         QtGui.QAction.__init__(self,
                                QtGui.QIcon(':/plugins/pixel_calculator/icon.png'),
-                               'Bereken pixelwaarde',
+                               self.main.tr('Bereken pixelwaarde'),
                                parent)
 
         self.mapCanvas = self.main.iface.mapCanvas()

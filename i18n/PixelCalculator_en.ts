@@ -44,5 +44,10 @@
         <source>Pixelberekening</source>
         <translation>Pixel calculation</translation>
     </message>
+    <message>
+        <location filename="../pixel_measure/action.py" line="24"/>
+        <source>Bereken pixelwaarde</source>
+        <translation>Calculate pixelvalue</translation>
+    </message>
 </context>
 </TS>
