@@ -41,13 +41,16 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         self._buffer = max(self.pixelSizeX, self.pixelSizeY)
         self.geomBbox = self.geomBbox.buffered(self._buffer)
 
-        self.blockBbox = self._alignRectangleToGrid(self.geomBbox)
-        self.blockWidth = int(self.blockBbox.width()/self.pixelSizeX)
-        self.blockHeight = int(self.blockBbox.height()/self.pixelSizeY)
-        self.block = self.rasterLayer.dataProvider().block(self.band,
-                                                           self.blockBbox,
-                                                           self.blockWidth,
-                                                           self.blockHeight)
+        if self.geomBbox.intersects(self.rasterLayer.extent()):
+            self.blockBbox = self._alignRectangleToGrid(self.geomBbox)
+            self.blockWidth = int(self.blockBbox.width()/self.pixelSizeX)
+            self.blockHeight = int(self.blockBbox.height()/self.pixelSizeY)
+            self.block = self.rasterLayer.dataProvider().block(self.band,
+                                                               self.blockBbox,
+                                                               self.blockWidth,
+                                                               self.blockHeight)
+        else:
+            self.blockBbox = self.blockWidth = self.blockHeight = self.block = None
 
         self.stats = {}
         self.newGeometry = None
@@ -106,6 +109,10 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         """
         valSum = 0
         valCnt = 0
+
+        if self.block is None:
+            self.completed.emit((self.newGeometry, self.stats))
+            return True
 
         self.progressDone = 0
         self.progressTodo = self.blockHeight * self.blockWidth * 2
