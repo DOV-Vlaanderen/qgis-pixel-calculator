@@ -27,9 +27,9 @@ class PixelMeasureAction(QtGui.QAction):
                                parent)
 
         self.mapCanvas = self.main.iface.mapCanvas()
-        self.mapCanvas.extentsChanged.connect(self.populateVisible)
+        self.mapCanvas.extentsChanged.connect(self._populateVisible)
 
-        self.main.iface.currentLayerChanged.connect(self.populateApplicable)
+        self.main.iface.currentLayerChanged.connect(self._populateApplicable)
 
         self.previousMapTool = None
         self.rasterLayer = None
@@ -37,21 +37,22 @@ class PixelMeasureAction(QtGui.QAction):
         self.layer = None
         self.activeLayer = None
 
-        self.populateApplicable()
+        self._populateApplicable()
 
         self.setCheckable(True)
         self.triggered.connect(self.activate)
 
-    def populateApplicable(self):
+    def _populateApplicable(self):
+        """Save the active layer, set the raster layer if applicable and call _populateVisible()."""
         self.active_layer = self.main.iface.activeLayer()
         if isinstance(self.active_layer, QGisCore.QgsRasterLayer):
             self.rasterLayer = self.active_layer
         else:
             self.rasterLayer = None
-        self.populateVisible()
+        self._populateVisible()
 
-    def populateVisible(self):
-        """Show or hide the action based on the visibility of the raster layer.
+    def _populateVisible(self):
+        """Enable or disable the action based on the visibility of the raster layer.
         Only show the action in the toolbar if the corresponding raster layer
         is visible too.
         """
@@ -118,10 +119,10 @@ class PixelMeasureAction(QtGui.QAction):
             self.main.iface.setActiveLayer(self.calculatedLayer)
             self.rasterLayer = None
             self.calculatedLayer = None
-            self.populateApplicable()
+            self._populateApplicable()
 
     def deactivate(self):
         """Deactivate by disconnecting signals and stopping measurement."""
         self.triggered.disconnect(self.startMeasure)
-        self.mapCanvas.extentsChanged.connect(self.populateVisible)
+        self.mapCanvas.extentsChanged.connect(self._populateVisible)
         self.stopMeasure()

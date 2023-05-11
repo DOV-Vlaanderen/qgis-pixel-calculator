@@ -6,7 +6,7 @@ from .pool import WorkerThreadPool
 
 
 class RasterBlockWrapperTask(QGisCore.QgsTask):
-    """Class to align a vector geometry to the grid of a raster layer."""
+    """Task to align a vector geometry to the grid of a raster layer."""
 
     completed = QtCore.pyqtSignal(object)
     failed = QtCore.pyqtSignal()
@@ -57,10 +57,12 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
 
     def _alignRectangleToGrid(self, rect):
         """Aligns the given rectangle to the grid of the raster layer.
+
         Parameters
         ----------
         rect : QGisCore.QgsRectangle
             Rectangle to align.
+
         Returns
         -------
         QGisCore.QgsRectangle
@@ -160,7 +162,9 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
 
         processPixelPool = WorkerThreadPool(progress_function=progressTracker)
         aggregateGeomPool = WorkerThreadPool(
-            progress_function=progressTracker, cancel_function=cancelFunction, aggregation_function=aggregateGeometry)
+            progress_function=progressTracker,
+            cancel_function=cancelFunction,
+            aggregation_function=aggregateGeometry)
 
         for r in range(self.blockHeight):
             for c in range(self.blockWidth):
@@ -198,10 +202,11 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         if valCnt > 0:
             self.stats['sum'] = valSum
             self.stats['count'] = valCnt
-            self.stats['avg'] = valSum/float(valCnt)
+            self.stats['mean'] = valSum/float(valCnt)
 
         self.completed.emit((self.newGeometry, self.stats))
         return True
 
     def cancel(self):
+        """Cancel the task."""
         self.shouldCancel = True

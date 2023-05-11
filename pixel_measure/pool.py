@@ -17,6 +17,15 @@ class WorkerThreadPool:
         ----------
         worker_count : int, optional
             Number of worker threads to use, defaults to os.cpu_count
+        progress_function: function, optional
+            Function to call when a job has been executed.
+        cancel_function: function, optional
+            Function to check whether the executing of the jobs needs to stop. Should return a boolean:
+            True if we should cancel, False if we should continue working.
+        aggregation_function: function, optional
+            Function to aggregate the results per worker thread. This function should accept two arguments
+            (the current aggregate and the item to add) and return the new aggregate. When the aggregation function
+            is provided, the pool result will not contain one item per executed job, but one item per worker thread.
         """
         self.worker_count = worker_count or os.cpu_count()
 
@@ -148,8 +157,19 @@ class WorkerThread(Thread):
         input_queue : queue.Queue
             Queue to poll for input, this should be in the form of a tuple with
             3 items: function to call, list with arguments and WorkerResult
-            instance to store the output. The list with arguments will be
-            automatically extended with the local Session instance.
+            instance to store the output.
+        result_queue: queue.Queue
+            Queue to store the results, either results from each job or the aggregated result when using an
+            aggregation_function.
+        progress_function: function, optional
+            Function to call when a job has been executed.
+        cancel_function: function, optional
+            Function to check whether the executing of the jobs needs to stop. Should return a boolean:
+            True if we should cancel, False if we should continue working.
+        aggregation_function: function, optional
+            Function to aggregate the results per worker thread. This function should accept two arguments
+            (the current aggregate and the item to add) and return the new aggregate. When the aggregation function
+            is provided, the pool result will not contain one item per executed job, but one item per worker thread.
         """
         super().__init__()
         self.input_queue = input_queue
@@ -165,14 +185,17 @@ class WorkerThread(Thread):
         self.stopping = False
 
     def _should_cancel(self):
+        """Whether we should cancel processing jobs. Returns True if we should cancel
+        and False if we should continue working."""
         if self.cancel_function:
             return self.cancel_function()
         else:
             return False
 
     def stop(self):
-        """Stop the worker thread at the next occasion. This can take up to
-        500 ms. """
+        """Stop the worker thread at the next occasion. This can take up to 500 ms.
+        Will also aggregate the results when using an aggregation_function.
+        """
         self.stopping = True
 
         if self.aggregation_function:
