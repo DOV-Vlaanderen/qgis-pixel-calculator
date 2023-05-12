@@ -23,7 +23,7 @@ class PixelMeasureAction(QtGui.QAction):
 
         QtGui.QAction.__init__(self,
                                QtGui.QIcon(':/plugins/pixel_calculator/icon.png'),
-                               self.main.tr('Bereken pixelwaarde'),
+                               self.main.tr('Calculate pixelvalue'),
                                parent)
 
         self.mapCanvas = self.main.iface.mapCanvas()
@@ -57,22 +57,22 @@ class PixelMeasureAction(QtGui.QAction):
         is visible too.
         """
         if self.layer is not None:
-            self.setToolTip(self.main.tr('Berekening actief. Beëindig de huidige berekening.'))
+            self.setToolTip(self.main.tr('Calculation active. End the current calculation.'))
             self.setEnabled(True)
         elif self.rasterLayer and \
             ((self.rasterLayer.hasScaleBasedVisibility() and
              self.rasterLayer.isInScaleRange(self.mapCanvas.scale())) or
                 not self.rasterLayer.hasScaleBasedVisibility()):
-            self.setToolTip(self.main.tr("Bereken pixelwaarde voor laag") + f" '{self.rasterLayer.name()}'.")
+            self.setToolTip(self.main.tr("Calculate pixelvalue for layer") + f" '{self.rasterLayer.name()}'.")
             self.setEnabled(True)
         elif self.rasterLayer and \
                 (self.rasterLayer.hasScaleBasedVisibility()
                  and not self.rasterLayer.isInScaleRange(self.mapCanvas.scale())):
             self.setToolTip(self.main.tr(
-                "De geselecteerde laag '{}' is niet zichtbaar op dit schaalniveau.").format(self.rasterLayer.name()))
+                "The selected layer '{}' is not visible at this scale.").format(self.rasterLayer.name()))
             self.setEnabled(False)
         else:
-            self.setToolTip(self.main.tr('Selecteer een rasterlaag om een berekening te kunnen starten.'))
+            self.setToolTip(self.main.tr('Select a raster layer to start a calculation.'))
             self.setEnabled(False)
 
     def activate(self, checked):
@@ -94,7 +94,7 @@ class PixelMeasureAction(QtGui.QAction):
         """
         layer = PixelisedVectorLayer(self, rasterLayer=self.rasterLayer,
                                      path='Multipolygon?crs=epsg:31370',
-                                     baseName=self.main.tr('Pixelberekening'),
+                                     baseName=self.main.tr('Pixel calculation'),
                                      providerLib='memory')
         self.calculatedLayer = self.rasterLayer
         self.layer = QGisCore.QgsProject.instance().addMapLayer(layer, False)

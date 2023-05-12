@@ -27,7 +27,7 @@ class RasterBlockWrapperTask(QGisCore.QgsTask):
         geometry : QGisCore.QgsGeometry
             Geometry to align to the raster grid.
         """
-        super().__init__(main.tr('Pixelwaarde berekenen'), QGisCore.QgsTask.CanCancel)
+        super().__init__(main.tr('Calculating pixelvalue'), QGisCore.QgsTask.CanCancel)
         self.setDependentLayers([rasterLayer])
         self.shouldCancel = False
 
