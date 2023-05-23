@@ -2,5 +2,6 @@ venv
 .venv
 
 help/build
+zip_build
 
 qgis
