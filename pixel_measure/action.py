@@ -1,10 +1,11 @@
 import PyQt5.QtGui as QtGui
+import PyQt5.QtWidgets as QtWidgets
 import qgis.core as QGisCore
 
 from .layer import PixelisedVectorLayer
 
 
-class PixelMeasureAction(QtGui.QAction):
+class PixelMeasureAction(QtWidgets.QAction):
     """Class representing the action to start the pixel measure.
     Used as a menu item and toolbar button.
     """
@@ -15,16 +16,16 @@ class PixelMeasureAction(QtGui.QAction):
         ----------
         main : PixelCalculator
             Instance of main class.
-        parent : QtGui.QWidget
+        parent : QtWidgets.QWidget
             Widget used as parent widget for the action.
         """
         self.main = main
         self.iface = self.main.iface
 
-        QtGui.QAction.__init__(self,
-                               QtGui.QIcon(':/plugins/pixel_calculator/icon.png'),
-                               self.main.tr('Calculate pixelvalue'),
-                               parent)
+        QtWidgets.QAction.__init__(self,
+                                   QtGui.QIcon(':/plugins/pixel_calculator/icon.png'),
+                                   self.main.tr('Calculate pixelvalue'),
+                                   parent)
 
         self.mapCanvas = self.main.iface.mapCanvas()
         self.mapCanvas.extentsChanged.connect(self._populateVisible)
