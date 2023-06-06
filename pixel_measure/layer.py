@@ -66,7 +66,7 @@ class PixelisedVectorLayer(QGisCore.QgsVectorLayer):
 
         label_format = QGisCore.QgsTextFormat()
         label_format.setSize(12)
-        label_format.setForcedBold(True)
+        label_format.setNamedStyle('Bold')
         label_format.setColor(QtGui.QColor(0, 0, 0, 255))
 
         label_buffer = QGisCore.QgsTextBufferSettings()
