@@ -4,9 +4,9 @@
 
 [general]
 name=PixelCalculator
-qgisMinimumVersion=3.0
+qgisMinimumVersion=3.16
 description=Interactively calculate the mean value of selected pixels of a raster layer.
-version=0.2.0
+version=0.3.0
 author=Roel Huybrechts
 email=roel.huybrechts@geosparc.com
 
@@ -29,10 +29,10 @@ repository=https://github.com/DOV-Vlaanderen/qgis-pixel-calculator
 hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
 changelog=Fixes and improvements
-         - Fix QAction import for PyQt5.
+        - Fix label style for QGis 3.16 compatibility.
 
 # Tags are comma separated with spaces allowed
-tags=python raster
+tags=python,raster
 
 homepage=https://github.com/DOV-Vlaanderen/qgis-pixel-calculator
 category=Raster
